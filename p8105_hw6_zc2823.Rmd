@@ -1,0 +1,143 @@
+---
+title: "Homework6_zc2823"
+output: github_document
+date: "2025-11-16"
+---
+
+```{r setup, include = FALSE}
+library(tidyverse)
+library(broom)
+library(rvest)
+library(p8105.datasets)
+library(janitor)
+library(scales)
+library(lubridate)
+
+knitr::opts_chunk$set(
+  fig.width = 6,
+  fig.asp = .6,
+  out.width = "90%"
+)
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+
+options(
+  ggplot2.continuous.color = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_color_discrete = scale_color_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+set.seed(1)
+```
+
+# Problem 1
+
+# Problem 2
+
+
+# Problem 3
+
+### Load data
+```{r warning=FALSE}
+homi_df = read_csv("data/homicide-data.csv") |> 
+  clean_names()
+```
+
+### Create city_state & summarize totals
+```{r}
+city_summary = homi_df |> 
+  mutate(
+    city_state = str_c(city, ", ", state),
+    unsolved = disposition %in% c("Closed without arrest", "Open/No arrest")
+  ) |> 
+  group_by(city_state) |> 
+  summarise(
+    total_homicides = n(),
+    unsolved_homicides = sum(unsolved, na.rm = TRUE),
+    .groups = "drop"
+  ) |> 
+  mutate(unsolved_rate = unsolved_homicides / total_homicides) |> 
+  arrange(desc(total_homicides))
+```
+
+#### Check the result
+```{r}
+city_summary |> slice_head(n = 10) |> knitr::kable()
+```
+
+#### Baltimore, MD example: proportion test
+```{r}
+baltimore_df = city_summary |> filter(city_state == "Baltimore, MD")
+
+baltimore_test = prop.test(
+  x = baltimore_df$unsolved_homicides,
+  n = baltimore_df$total_homicides
+) |> tidy() |> 
+  select(estimate, conf.low, conf.high)
+
+baltimore_test |> 
+  knitr::kable()
+```
+
+### Apply prop.test to all cities
+```{r}
+# Define function to run prop.test and return tidy results
+city_prop = function(df_city) {
+  tidy(prop.test(
+    x = df_city$unsolved_homicides,
+    n = df_city$total_homicides
+  )) |> select(estimate, conf.low, conf.high)
+}
+
+# Apply across all cities
+city_results = city_summary |> 
+  filter(total_homicides >= 5) |> 
+  nest(data = c(total_homicides, unsolved_homicides)) |> 
+  mutate(tidy_res = map(data, ~city_prop(.x))) |> 
+  select(-data) |> 
+  unnest(tidy_res) |> 
+  arrange(estimate) |> 
+  mutate(city_state = factor(city_state, levels = city_state))
+```
+
+### Visualization
+```{r city-plot, fig.width=10, fig.height=12, dpi=150, out.width='100%'}
+city_results %>%
+  mutate(city_state = fct_reorder(city_state, estimate)) %>%
+  ggplot(aes(x = city_state, y = estimate, color = estimate)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.3) +
+  geom_hline(
+    yintercept = mean(city_results$estimate),
+    color = "red", linetype = "dashed", linewidth = 0.6
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = percent_format(accuracy = 1),
+    breaks = seq(0, 1, 0.1)
+  ) +
+  scale_color_viridis_c(option = "C", direction = -1, labels = percent_format(accuracy = 1)) +
+  labs(
+    title = "Proportion of Unsolved Homicides by City (95% CI)",
+    subtitle = "Red dashed line = overall mean; color = estimated unsolved proportion",
+    x = "City",
+    y = "Estimated Unsolved Proportion",
+    color = "Proportion"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 10, color = "gray40"),
+    axis.text.y = element_text(size = 8),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "right"
+  )
+```
+
+Across 50 major U.S. cities, the proportion of unsolved homicides ranges widely from ~25% to over 70%. Chicago, New Orleans, and Baltimore exhibit the highest unsolved rates, while Richmond and Charlotte show the lowest. The overall mean unsolved proportion is about 50%, indicating that roughly half of homicide cases nationwide remain unresolved.
+
+
+
+
