@@ -12,6 +12,7 @@ library(p8105.datasets)
 library(janitor)
 library(scales)
 library(lubridate)
+library(patchwork)
 
 knitr::opts_chunk$set(
   fig.width = 6,
@@ -136,6 +137,93 @@ In contrast, many large cities—including Baltimore, MD, Chicago, IL, Cincinnat
 
 # Problem 2
 
+### Load the data
+```{r}
+data("weather_df")
+weather_df = weather_df |> 
+  drop_na(tmax, tmin, prcp)
+```
+
+### Define bootstrap function
+```{r}
+boot_samples = 
+  weather_df |> 
+  modelr::bootstrap(n = 5000)
+```
+
+### Produce estimates of the two quantities
+```{r}
+boot_results =
+  boot_samples |> 
+  mutate(
+    models = map(strap, \(df) lm(tmax ~ tmin + prcp, data = df)),
+    glance  = map(models, glance),
+    tidyres = map(models, tidy)
+  ) |> 
+  mutate(
+    r2 = map_dbl(glance, \(g) g$r.squared),
+
+    beta_ratio = map_dbl(tidyres, \(t) {
+      b1 = t$estimate[t$term == "tmin"]
+      b2 = t$estimate[t$term == "prcp"]
+      b1 / b2
+    })
+  ) |> 
+  select(r2, beta_ratio)
+```
+
+### Hist/Density plot
+#### r² distribution + β1 / β2 distribution
+```{r fig.width=8, fig.height=18}
+p_r2 =
+  boot_results |> 
+  ggplot(aes(x = r2)) +
+  geom_density(fill = "skyblue", alpha = 0.5) +
+  labs(
+    title = "Bootstrap Distribution of R²",
+    x = "R²",
+    y = "Density"
+  )
+
+p_ratio =
+  boot_results |> 
+  ggplot(aes(x = beta_ratio)) +
+  geom_density(fill = "orange", alpha = 0.5) +
+  labs(
+    title = "Bootstrap Distribution of β1/β2",
+    x = "β1/β2",
+    y = "Density"
+  )
+
+p_r2 + p_ratio 
+```
+
+The bootstrap distributions of the two statistics exhibit strikingly different behaviors. The distribution of $R^2$ is extremely narrow and highly concentrated around its observed value, indicating that the strength of the linear relationship between $t_{\max}$ and the predictors is very stable across bootstrap samples. In contrast, the distribution of the ratio $\beta_1 / \beta_2$ is much wider and substantially more variable. This occurs because precipitation (the coefficient $\beta_2$) has a much weaker and less stable association with maximum temperature, making the ratio $\beta_1 / \beta_2$ highly sensitive and unstable.
+
+Although the vertical scales of the two density plots differ due to probability density normalization, placing the distributions side-by-side is still informative. The comparison clearly shows that $R^2$ is a highly stable estimator, whereas the ratio $\beta_1 / \beta_2$ exhibits substantial uncertainty. The combined visualization therefore effectively highlights the relative variability of the two bootstrap estimators.
+
+### 95% CI
+```{r}
+r2_ci =
+  boot_results |> 
+  summarize(
+    low  = quantile(r2, 0.025),
+    high = quantile(r2, 0.975)
+  )
+
+ratio_ci =
+  boot_results |> 
+  summarize(
+    low  = quantile(beta_ratio, 0.025),
+    high = quantile(beta_ratio, 0.975)
+  )
+```
+
+Using the 5000 bootstrap samples, the 95% confidence interval for \(R^2\) is  
+**`r round(r2_ci$low, 3)`** to **`r round(r2_ci$high, 3)`**.
+
+For the ratio \( \beta_1 / \beta_2 \), the 95% bootstrap interval is  
+**`r round(ratio_ci$low, 3)`** to **`r round(ratio_ci$high, 3)`**.
 
 # Problem 3
 
